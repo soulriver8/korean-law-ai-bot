@@ -1,0 +1,13 @@
+fastmcp>=0.9.0
+uvicorn>=0.24.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+cachetools>=5.3.0
+fastapi>=0.104.0
+
+# 외부 API 통신 (MCP 서버 호출용)
+httpx
+
+# AI 모델 연동
+google-genai

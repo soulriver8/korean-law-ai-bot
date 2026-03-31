@@ -1,0 +1,24 @@
+# 1. Security (가장 중요: 절대 Git에 올라가면 안 되는 파일)
+.env
+*.pem
+*.key
+credentials.json
+
+# 2. Python & Virtual Environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# 3. OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# 4. Logs & Databases
+*.log
+*.sqlite3

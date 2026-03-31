@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LexGuard AI - 법령 분석 시스템</title>
+    <!-- 디자인의 핵심: Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- LLM의 마크다운 텍스트를 예쁘게 변환해주는 파서 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* 커스텀 스크롤바 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .prose p { margin-bottom: 0.5rem; }
+    </style>
+</head>
+<body class="bg-slate-50 h-screen flex flex-col items-center p-4">
+
+    <div class="w-full max-w-3xl bg-white rounded-xl shadow-lg h-full flex flex-col overflow-hidden border border-slate-200">
+        <!-- 헤더 영역 -->
+        <div class="bg-slate-800 text-white p-4 text-center shadow-md z-10">
+            <h1 class="text-xl font-bold tracking-tight">LexGuard AI</h1>
+            <p class="text-xs text-slate-300 mt-1">국가법령정보센터 실시간 연동 분석 시스템</p>
+        </div>
+
+        <!-- 채팅 로그 영역 -->
+        <div id="chat-box" class="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
+            <!-- 초기 안내 메시지 -->
+            <div class="flex items-start gap-3">
+                <div class="bg-slate-800 text-white p-2 rounded-lg text-sm font-bold">AI</div>
+                <div class="bg-white border border-slate-200 p-3 rounded-xl rounded-tl-none shadow-sm max-w-[85%] text-sm text-slate-700">
+                    안녕하십니까. 법령 분석 시스템입니다. 궁금한 법안이나 실무 규정을 질문해 주십시오. (예: 근로기준법상 연차 휴가 규정)
+                </div>
+            </div>
+        </div>
+
+        <!-- 입력 영역 -->
+        <div class="p-4 bg-white border-t border-slate-200">
+            <div class="flex gap-2 relative">
+                <input type="text" id="user-input" 
+                    class="flex-1 border border-slate-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-slate-500 text-sm"
+                    placeholder="법령 관련 질문을 입력하세요..." 
+                    onkeypress="if(event.key === 'Enter') sendMessage()">
+                <button onclick="sendMessage()" id="send-btn"
+                    class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+                    전송
+                </button>
+            </div>
+            <!-- 로딩 상태 표시기 (디폴트는 숨김) -->
+            <div id="loading-indicator" class="hidden mt-2 text-xs text-slate-500 flex items-center justify-center gap-2">
+                <svg class="animate-spin h-4 w-4 text-slate-800" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                국가법령정보센터에서 조문을 검색하고 분석 중입니다...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function sendMessage() {
+            const inputField = document.getElementById('user-input');
+            const message = inputField.value.trim();
+            if (!message) return;
+
+            // 1. 사용자 질문을 화면에 렌더링
+            appendMessage('User', message);
+            inputField.value = '';
+            
+            // 2. UI 상태 변경 (로딩 띄우고 버튼 비활성화)
+            toggleLoading(true);
+
+            try {
+                // 3. 백엔드 API 호출
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: message })
+                });
+
+                if (!response.ok) throw new Error('API 통신 에러');
+                const data = await response.json();
+
+                // 4. AI 답변을 마크다운으로 렌더링하여 화면에 출력
+                appendMessage('AI', data.answer, true);
+
+            } catch (error) {
+                appendMessage('Error', '서버 통신 중 오류가 발생했습니다. 터미널 로그를 확인해주세요.');
+                console.error(error);
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        function appendMessage(sender, text, isMarkdown = false) {
+            const chatBox = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = 'flex items-start gap-3 ' + (sender === 'User' ? 'flex-row-reverse' : '');
+            
+            const avatar = document.createElement('div');
+            avatar.className = sender === 'User' 
+                ? 'bg-blue-600 text-white p-2 rounded-lg text-sm font-bold' 
+                : (sender === 'Error' ? 'bg-red-500 text-white p-2 rounded-lg text-sm font-bold' : 'bg-slate-800 text-white p-2 rounded-lg text-sm font-bold');
+            avatar.innerText = sender === 'Error' ? '!' : sender;
+
+            const content = document.createElement('div');
+            content.className = sender === 'User'
+                ? 'bg-blue-600 text-white p-3 rounded-xl rounded-tr-none shadow-sm max-w-[85%] text-sm'
+                : 'bg-white border border-slate-200 p-3 rounded-xl rounded-tl-none shadow-sm max-w-[85%] text-sm text-slate-800 prose prose-sm';
+            
+            // AI 답변이면 마크다운 파싱, 아니면 일반 텍스트
+            if (isMarkdown) {
+                content.innerHTML = marked.parse(text);
+            } else {
+                content.innerText = text;
+            }
+
+            div.appendChild(avatar);
+            div.appendChild(content);
+            chatBox.appendChild(div);
+            
+            // 스크롤을 항상 맨 아래로 유지
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function toggleLoading(isLoading) {
+            document.getElementById('loading-indicator').classList.toggle('hidden', !isLoading);
+            document.getElementById('send-btn').disabled = isLoading;
+            document.getElementById('user-input').disabled = isLoading;
+        }
+    </script>
+</body>
+</html>

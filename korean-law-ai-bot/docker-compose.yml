@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # 1. LexGuard MCP 법령 검색 서버
+  lexguard:
+    build: 
+      context: ./lexguard-mcp  # 하위 폴더의 Dockerfile을 사용해 빌드
+    container_name: lexguard-server
+    ports:
+      - "8099:8099"
+    environment:
+      - PORT=8099
+    restart: unless-stopped
+
+  # 2. 메인 챗봇 서버 (FastAPI + UI)
+  chatbot:
+    build: 
+      context: .
+    container_name: law-chatbot-server
+    ports:
+      - "8000:8000"
+    environment:
+      # 컨테이너 내부에서는 'localhost'가 아니라 서비스명 'lexguard'로 통신해야 합니다.
+      - MCP_INTERNAL_URL=http://lexguard:8099/mcp
+      # .env 파일 대신 여기서 API 키를 주입받도록 설정할 수 있습니다. (보안상 운영 서버에 직접 세팅 권장)
+    env_file:
+      - .env
+    depends_on:
+      - lexguard  # lexguard가 먼저 켜진 후 챗봇 서버가 켜지도록 순서 보장
+    restart: unless-stopped

@@ -1,0 +1,13 @@
+# 백엔드 엔진
+fastapi
+uvicorn
+
+# 외부 API 통신 (MCP 서버 호출용)
+httpx
+
+# AI 모델 연동
+google-genai
+
+# 환경 변수 및 데이터 검증
+python-dotenv
+pydantic

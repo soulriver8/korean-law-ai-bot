@@ -42,6 +42,9 @@ async def chat(request: ChatRequest):
     # 3. Stateless 비동기 S2S 통신 (필요할 때만 가볍게 API 호출)
     search_result = "검색된 데이터가 없습니다."
     
+    # ✨ 2. 도대체 어디로 요청을 보내는지 로그를 찍어봅니다. (디버깅용)
+    print(f"🚀 [Debug] 현재 연결 시도 중인 MCP 서버 주소: {MCP_URL}")
+
     async with httpx.AsyncClient() as client:
         try:
             # JSON-RPC 표준 규격으로 검색 도구 호출
@@ -107,3 +110,7 @@ async def chat(request: ChatRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
+@app.get("/health")
+async def health_check():
+    return {"status": "alive", "target": "Law Chatbot Main"}

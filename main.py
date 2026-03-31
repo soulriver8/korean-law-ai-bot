@@ -93,6 +93,13 @@ async def chat(request: ChatRequest):
                 
         except httpx.TimeoutException:
             search_result = "법령 검색 서버 응답 지연 (Timeout)."
+        # ✨ [아키텍트 방어막] 502, 404 등 상대 서버가 죽었을 때 앱 전체가 뻗는 것을 방지
+        except httpx.HTTPStatusError as e:
+            print(f"⚠️ [Error] MCP 서버 상태 이상: {e.response.status_code}")
+            search_result = f"법령 검색 서버가 현재 응답할 수 없습니다. (상태 코드: {e.response.status_code})"
+        except Exception as e:
+            print(f"⚠️ LexGuard 호출 실패: {e}")
+            search_result = "법령 검색 서버에 연결할 수 없습니다."
 
     # 4. 검색된 '팩트' 데이터를 Gemini에게 주입하여 답변 생성 (할루시네이션 원천 차단)
     final_prompt = f"사용자 질문: {request.message}\n\n[국가법령 검색 데이터]\n{search_result}\n\n위 데이터에만 근거하여 답변을 제공해."

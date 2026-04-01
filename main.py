@@ -144,20 +144,75 @@ async def chat(request: ChatRequest):
             
             if parsed_data and "result" in parsed_data:
                 content_list = parsed_data["result"].get("content", [])
-
-                # 🔍 전체 구조 확인용 임시 로그
-                print(f"📦 content_list 길이: {len(content_list)}")
-                for i, item in enumerate(content_list):
-                    print(f"  [{i}] type={item.get('type')}, text 앞 200자: {item.get('text','')[:200]}")
-
-
-                if content_list and len(content_list) > 0:
-                    # 무조건 마지막 요소(진짜 데이터)를 가져오도록 [-1] 유지
-                    search_result = content_list[-1].get("text", "검색 결과 텍스트가 없습니다.")
+                
+                # [0]은 MCP 자체 프롬프트 지시문 → 무시
+                # [1]은 실제 법령 데이터 JSON
+                raw_json_str = None
+                for item in content_list:
+                    text = item.get("text", "")
+                    if text.startswith("{") and '"success"' in text:
+                        raw_json_str = text
+                        break
+                
+                if raw_json_str:
+                    try:
+                        mcp_data = json.loads(raw_json_str)
+                        
+                        # 검색 실패 케이스 처리
+                        if not mcp_data.get("success_search") or not mcp_data.get("has_legal_basis"):
+                            missing = mcp_data.get("missing_reason", "NO_MATCH")
+                            search_result = f"관련 법령을 찾을 수 없습니다. (사유: {missing})"
+                        else:
+                            # 법령 데이터 추출 및 정제
+                            extracted_parts = []
+                            laws = mcp_data.get("results", {}).get("laws", [])
+                            
+                            for law in laws:
+                                law_name = law.get("law_name", "")
+                                detail_str = law.get("detail", "")
+                                
+                                # detail이 문자열이면 다시 파싱
+                                if isinstance(detail_str, str):
+                                    try:
+                                        detail = json.loads(detail_str)
+                                    except:
+                                        detail = {"raw": detail_str}
+                                else:
+                                    detail = detail_str
+                                
+                                # 조문 본문만 추출 (개정문 제외)
+                                articles = []
+                                try:
+                                    # 법령 구조에서 조문 탐색
+                                    body = detail.get("법령", {})
+                                    jo_list = body.get("조문", {}).get("조문단위", [])
+                                    if isinstance(jo_list, dict):
+                                        jo_list = [jo_list]
+                                    
+                                    for jo in jo_list:
+                                        jo_num = jo.get("조문번호", "")
+                                        jo_title = jo.get("조문제목", "")
+                                        jo_content = jo.get("조문내용", "")
+                                        
+                                        # 연차/휴가 관련 조문만 필터 (전체가 너무 클 경우)
+                                        combined = f"{jo_title}{jo_content}"
+                                        articles.append(f"제{jo_num}조({jo_title}): {jo_content}")
+                                    
+                                except Exception as e:
+                                    print(f"⚠️ 조문 파싱 실패: {e}")
+                                    articles.append(str(detail)[:3000])
+                                
+                                extracted_parts.append(
+                                    f"=== {law_name} ===\n" + "\n".join(articles[:20])  # 최대 20개 조문
+                                )
+                            
+                            search_result = "\n\n".join(extracted_parts) if extracted_parts else "조문 데이터를 추출할 수 없습니다."
+                            
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ MCP JSON 파싱 실패: {e}")
+                        search_result = raw_json_str[:3000]
                 else:
-                    search_result = str(parsed_data["result"])
-            else:
-                search_result = "MCP 서버에서 올바른 형식의 응답을 받지 못했습니다."
+                    search_result = "MCP 서버에서 올바른 형식의 응답을 받지 못했습니다."
                 
         except httpx.TimeoutException:
             search_result = "법령 검색 서버 응답 지연 (Timeout)."

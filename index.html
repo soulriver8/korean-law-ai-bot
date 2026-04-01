@@ -132,7 +132,7 @@
                 // raw_mcp_data가 없으면 빈 문자열 처리
                 const rawData = debugInfo.raw_mcp_data || "데이터 없음";
                 // 너무 길면 브라우저가 버벅이므로 1500자까지만 보여줌
-                const displayData = rawData.length > 1500 ? rawData.substring(0, 1500) + '... (데이터가 길어 화면에서는 생략됨)' : rawData;
+                const displayData = rawData.length > 1500 ? rawData.substring(0, 10000000000000000) + '... (데이터가 길어 화면에서는 생략됨)' : rawData;
 
                 debugDiv.innerHTML = `
                     <summary class="font-bold text-slate-700 bg-slate-200 p-2 cursor-pointer hover:bg-slate-300 transition-colors">

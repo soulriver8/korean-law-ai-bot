@@ -17,6 +17,11 @@ from ..repositories.local_ordinance_repository import LocalOrdinanceRepository
 from ..repositories.administrative_rule_repository import AdministrativeRuleRepository
 from ..repositories.law_comparison_repository import LawComparisonRepository
 
+import json # 추가
+import os   # 추가
+import asyncio # 추가
+import google.generativeai as genai # 추가 (pip install google-generativeai 필요)
+
 
 class SmartSearchService:
     """
@@ -672,26 +677,43 @@ class SmartSearchService:
             all_params[st] = params
         
         # 쿼리 전처리: 긴 문장에서 핵심 키워드만 추출 (API 에러 방지)
-        def extract_keywords(text: str) -> str:
-            """긴 문장에서 핵심 키워드만 추출"""
-            # 법령명 패턴 제거 (이미 extract_parameters에서 처리)
-            # 질문어 제거
-            question_words = ["인가", "인지", "인가요", "인지요", "인가?", "인지?", "뭐야", "뭐야?", "알려줘", "알려줘요", "찾아줘", "찾아줘요"]
-            cleaned = text
-            for qw in question_words:
-                cleaned = cleaned.replace(qw, "")
+        # def extract_keywords(text: str) -> str:
+        #     """긴 문장에서 핵심 키워드만 추출"""
+        #     # 법령명 패턴 제거 (이미 extract_parameters에서 처리)
+        #     # 질문어 제거
+        #     question_words = ["인가", "인지", "인가요", "인지요", "인가?", "인지?", "뭐야", "뭐야?", "알려줘", "알려줘요", "찾아줘", "찾아줘요"]
+        #     cleaned = text
+        #     for qw in question_words:
+        #         cleaned = cleaned.replace(qw, "")
             
-            # 핵심 키워드 추출 (2-4글자 명사 위주)
-            import re
-            # 한글 명사 패턴 (2글자 이상)
-            keywords = re.findall(r'[가-힣]{2,}', cleaned)
-            # 중복 제거하고 길이 순 정렬
-            keywords = sorted(set(keywords), key=len, reverse=True)
-            # 상위 3-5개만 선택
-            return " ".join(keywords[:5])
+        #     # 핵심 키워드 추출 (2-4글자 명사 위주)
+        #     import re
+        #     # 한글 명사 패턴 (2글자 이상)
+        #     keywords = re.findall(r'[가-힣]{2,}', cleaned)
+        #     # 중복 제거하고 길이 순 정렬
+        #     keywords = sorted(set(keywords), key=len, reverse=True)
+        #     # 상위 3-5개만 선택
+        #     return " ".join(keywords[:5])
+
+        # 🚨 [수술 완료] AI 라우터 가동!
+        llm_analysis = await self.analyze_query_with_llm(query)
         
-        # 키워드 추출
-        keyword_query = extract_keywords(query)
+        if llm_analysis and not llm_analysis.get("is_ambiguous"):
+            # AI가 번역해준 완벽한 키워드와 의도를 그대로 사용!
+            search_types = llm_analysis.get("intent", ["law"])
+            keyword_query = llm_analysis.get("optimized_keywords", query)
+            
+            # 파라미터에 AI가 찾은 법령명 덮어쓰기
+            if llm_analysis.get("law_name"):
+                for st in search_types:
+                    if st in all_params:
+                        all_params[st]["law_name"] = llm_analysis["law_name"]
+                        
+            print(f"🧠 [AI 라우터 작동] 원본: {query} ➔ 검색어: {keyword_query} ➔ 의도: {search_types}")
+        else:
+            # AI 통신 실패 시 기존 무식한 방법(Fallback) 유지
+            print("⚙️ [기본 라우터 작동] AI 호출 실패, 기존 로직 사용")
+            keyword_query = query.replace("알려줘", "").replace("뭐야", "").strip()
         
         # 병렬 검색 실행
         results = {}
@@ -719,10 +741,10 @@ class SmartSearchService:
                             arguments
                         )
                     else:
-                        # 첫 시도: 원본 query
+                        # 첫 시도: 원본 query ➔ 🚨 [수술] AI가 정제한 keyword_query로 쏜다!
                         result = await asyncio.to_thread(
                             self.law_search_repo.search_law,
-                            query,
+                            keyword_query, # 👈 여기를 query에서 keyword_query로 변경!!!
                             1,
                             max_results_per_type,
                             arguments
@@ -759,16 +781,11 @@ class SmartSearchService:
                                 )
                 
                 elif search_type == "precedent":
-                    # 첫 시도: 원본 query
+                    # 첫 시도: 원본 query ➔ 🚨 [수술] 여기도 keyword_query로!
                     result = await asyncio.to_thread(
                         self.precedent_repo.search_precedent,
-                        query,
-                        1,
-                        max_results_per_type,
-                        None,
-                        None,
-                        None,
-                        arguments
+                        keyword_query, # 👈 변경!!!
+                        1, max_results_per_type, None, None, None, arguments
                     )
                     
                     # 실패 시 Fallback: 키워드만으로 재시도
@@ -809,14 +826,11 @@ class SmartSearchService:
                             )
                 
                 elif search_type == "interpretation":
-                    # 첫 시도: 원본 query
+                    # 🚨 [수술] 여기도 keyword_query로!
                     result = await asyncio.to_thread(
                         self.interpretation_repo.search_law_interpretation,
-                        query,
-                        1,
-                        max_results_per_type,
-                        params.get("agency"),  # 부처명 전달
-                        arguments
+                        keyword_query, # 👈 변경!!!
+                        1, max_results_per_type, params.get("agency"), arguments
                     )
                     
                     # 실패 시 Fallback: 키워드만으로 재시도
@@ -837,7 +851,7 @@ class SmartSearchService:
                 elif search_type == "administrative_appeal":
                     result = await asyncio.to_thread(
                         self.appeal_repo.search_administrative_appeal,
-                        query,
+                        keyword_query, # 👈 여기 변경 (query -> keyword_query)
                         1,
                         max_results_per_type,
                         None,
@@ -848,7 +862,7 @@ class SmartSearchService:
                 elif search_type == "constitutional":
                     result = await asyncio.to_thread(
                         self.constitutional_repo.search_constitutional_decision,
-                        query,
+                        keyword_query, # 👈 여기 변경 (query -> keyword_query)
                         1,
                         max_results_per_type,
                         None,
@@ -860,7 +874,7 @@ class SmartSearchService:
                     result = await asyncio.to_thread(
                         self.committee_repo.search_committee_decision,
                         params["committee_type"],
-                        query,
+                        keyword_query, # 👈 여기 변경
                         1,
                         max_results_per_type,
                         arguments
@@ -870,7 +884,7 @@ class SmartSearchService:
                     result = await asyncio.to_thread(
                         self.special_appeal_repo.search_special_administrative_appeal,
                         params["tribunal_type"],
-                        query,
+                        keyword_query, # 👈 여기 변경
                         1,
                         max_results_per_type,
                         arguments
@@ -879,7 +893,7 @@ class SmartSearchService:
                 elif search_type == "ordinance":
                     result = await asyncio.to_thread(
                         self.ordinance_repo.search_local_ordinance,
-                        query,
+                        keyword_query, # 👈 여기 변경
                         None,
                         1,
                         max_results_per_type,
@@ -889,7 +903,7 @@ class SmartSearchService:
                 elif search_type == "rule":
                     result = await asyncio.to_thread(
                         self.rule_repo.search_administrative_rule,
-                        query,
+                        keyword_query, # 👈 여기 변경
                         params.get("agency"),  # 부처명 전달
                         1,
                         max_results_per_type,
@@ -1270,3 +1284,43 @@ class SmartSearchService:
         
         return response
 
+    async def analyze_query_with_llm(self, query: str) -> dict:
+            """Gemini를 활용한 지능형 쿼리 분석 및 법률 용어 번역기 (핵심 뇌)"""
+            # API 키 설정 (환경변수에서 읽어옴. Render 설정에 GEMINI_API_KEY가 있어야 함)
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                return None
+                
+            genai.configure(api_key=api_key)
+            
+            prompt = f"""
+            너는 대한민국 최고 수준의 법률 API 검색 라우터야.
+            사용자의 일상적인 질문을 분석해서, 국가법령정보센터 API가 검색할 수 있는 '정확한 법률 용어 명사' 2~3개로 변환해줘.
+
+            [절대 규칙 - 환각(Hallucination) 방지]
+            1. 일상어는 반드시 법률 용어로 번역해. (예: 월급 떼먹음 -> 임금 체불, 짤림 -> 해고, 알바 -> 단시간근로자)
+            2. '상', '규정', '알려줘', '어떻게', '뭐야' 같은 불필요한 서술어는 절대 포함하지 마.
+            3. 네가 임의로 조문 번호(예: 제60조)를 지어내지 마. 사용자가 명시했을 때만 추출해.
+            4. 출력은 반드시 아래 JSON 형식만 반환해. 마크다운(```json) 쓰지 말고 순수 JSON 텍스트만 줘.
+
+            [출력 형식]
+            {{
+                "intent": ["law", "precedent"], // 관련 높은 카테고리 우선순위대로 1~2개 (law, precedent, interpretation 등)
+                "optimized_keywords": "근로기준법 연차", // API 검색용 정제된 키워드 (띄어쓰기로 구분)
+                "law_name": "근로기준법", // 명확한 법령명이 유추되면 추출 (없으면 null)
+                "is_ambiguous": false // 질문이 너무 짧거나 모호한지 여부 (true/false)
+            }}
+
+            사용자 질문: "{query}"
+            """
+            try:
+                # 가장 빠르고 가벼운 모델 사용
+                model = genai.GenerativeModel('gemini-2.5-flash') 
+                response = await asyncio.to_thread(model.generate_content, prompt)
+                
+                # JSON 파싱 (마크다운 찌꺼기 제거)
+                result_text = response.text.replace("```json", "").replace("```", "").strip()
+                return json.loads(result_text)
+            except Exception as e:
+                print(f"🚨 LLM Routing Failed: {e}")
+                return None # 실패 시 기존 깡통 로직(Fallback)으로 돌아가도록 None 반환

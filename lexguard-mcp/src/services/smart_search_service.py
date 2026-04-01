@@ -1315,7 +1315,7 @@ class SmartSearchService:
             """
             try:
                 # 가장 빠르고 가벼운 모델 사용
-                model = genai.GenerativeModel('gemini-2.5-flash') 
+                model = genai.GenerativeModel('gemini-3.1-flash-lite-preview') 
                 response = await asyncio.to_thread(model.generate_content, prompt)
                 
                 # JSON 파싱 (마크다운 찌꺼기 제거)

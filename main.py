@@ -144,6 +144,13 @@ async def chat(request: ChatRequest):
             
             if parsed_data and "result" in parsed_data:
                 content_list = parsed_data["result"].get("content", [])
+
+                # 🔍 전체 구조 확인용 임시 로그
+                print(f"📦 content_list 길이: {len(content_list)}")
+                for i, item in enumerate(content_list):
+                    print(f"  [{i}] type={item.get('type')}, text 앞 200자: {item.get('text','')[:200]}")
+
+
                 if content_list and len(content_list) > 0:
                     # 무조건 마지막 요소(진짜 데이터)를 가져오도록 [-1] 유지
                     search_result = content_list[-1].get("text", "검색 결과 텍스트가 없습니다.")

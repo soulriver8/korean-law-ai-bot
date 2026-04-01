@@ -80,40 +80,11 @@ async def health_check():
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    
-    # =================================================================
-    # ✨ [STEP 1: Agentic Query Optimizer] Gemini의 뇌를 빌려 검색어 정제
-    # =================================================================
-    optimizer_prompt = f"""사용자의 질문: "{request.message}"
-    너는 대한민국 최고의 법률 검색어 최적화 AI야. 위 질문을 국가법령정보센터 검색 엔진이 가장 잘 찾을 수 있는 '정확한 법령명'과 '핵심 명사' 조합으로 변환해.
-    출력은 반드시 검색어 키워드만 나와야 해. 부가 설명은 절대 하지 마.
-    예시 1: "민방위 면제는 몇살부터?" -> "민방위기본법 편성 면제"
-    예시 2: "프리랜서도 연차 받을 수 있나요?" -> "근로기준법 연차휴가 근로자"
-    예시 3: "월세 계약 중간에 해지하고 싶어요" -> "주택임대차보호법 계약해지"
-    예시 4: "음주운전 벌금 얼마야?" -> "도로교통법 음주운전 벌칙"
-    """
-    
-    try:
-        opt_resp = gemini_client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
-            contents=optimizer_prompt,
-            config=genai_types.GenerateContentConfig(temperature=0.1)
-        )
-        optimized_query = opt_resp.text.strip()
-    except Exception as e:
-        print(f"⚠️ 검색어 최적화 실패, 원본 질문 사용: {e}")
-        optimized_query = request.message
-        
-    print("\n" + "🧠"*25)
-    print(f"🤖 [Agent Brain] 사용자의 일상어 질문: {request.message}")
-    print(f"🎯 [Agent Brain] LexGuard로 보낼 정제된 키워드: {optimized_query}")
-    print("🧠"*25 + "\n")
 
-    # =================================================================
-    # ✨ [STEP 2: MCP 서버 호출] 정제된 검색어(optimized_query) 사용
-    # =================================================================
-    search_result = "검색된 데이터가 없습니다."
-    print(f"🚀 [Debug] 현재 연결 시도 중인 MCP 서버 주소: {MCP_URL}")
+    # STEP 1, 3 제거 - MCP 결과를 그대로 Gemini에 위임
+    
+    search_result_prompt = ""   # content[0]: MCP의 답변 지시문
+    search_result_data = ""     # content[1]: 법령 원문 데이터
 
     async with httpx.AsyncClient() as client:
         try:
@@ -122,155 +93,67 @@ async def chat(request: ChatRequest):
                 "id": 1,
                 "method": "tools/call",
                 "params": {
-                    "name": "legal_qa_tool", 
-                    "arguments": {
-                        "query": optimized_query  # <--- 🚨 기존 request.message에서 변경됨!
-                    }
+                    "name": "legal_qa_tool",
+                    "arguments": {"query": request.message}  # 최적화 없이 그대로
                 }
             }
             resp = await client.post(MCP_URL, json=payload, timeout=60.0)
             resp.raise_for_status()
 
-            raw_text = resp.text
-            parsed_data = None
-            
-            for line in raw_text.splitlines():
+            for line in resp.text.splitlines():
                 if line.startswith("data: "):
                     try:
                         parsed_data = json.loads(line[6:])
+                        content_list = parsed_data.get("result", {}).get("content", [])
+                        
+                        for item in content_list:
+                            text = item.get("text", "")
+                            if text.startswith("{") and '"success"' in text:
+                                search_result_data = text      # 법령 원문
+                            else:
+                                search_result_prompt = text    # MCP 지시문
                         break
                     except json.JSONDecodeError:
                         continue
-            
-            if parsed_data and "result" in parsed_data:
-                content_list = parsed_data["result"].get("content", [])
-                
-                # [0]은 MCP 자체 프롬프트 지시문 → 무시
-                # [1]은 실제 법령 데이터 JSON
-                raw_json_str = None
-                for item in content_list:
-                    text = item.get("text", "")
-                    if text.startswith("{") and '"success"' in text:
-                        raw_json_str = text
-                        break
-                
-                if raw_json_str:
-                    try:
-                        mcp_data = json.loads(raw_json_str)
-                        
-                        # 검색 실패 케이스 처리
-                        if not mcp_data.get("success_search") or not mcp_data.get("has_legal_basis"):
-                            missing = mcp_data.get("missing_reason", "NO_MATCH")
-                            search_result = f"관련 법령을 찾을 수 없습니다. (사유: {missing})"
-                        else:
-                            # 법령 데이터 추출 및 정제
-                            extracted_parts = []
-                            laws = mcp_data.get("results", {}).get("laws", [])
-                            
-                            for law in laws:
-                                law_name = law.get("law_name", "")
-                                detail_str = law.get("detail", "")
-                                
-                                # detail이 문자열이면 다시 파싱
-                                if isinstance(detail_str, str):
-                                    try:
-                                        detail = json.loads(detail_str)
-                                    except:
-                                        detail = {"raw": detail_str}
-                                else:
-                                    detail = detail_str
-                                
-                                # 조문 본문만 추출 (개정문 제외)
-                                articles = []
-                                try:
-                                    # 법령 구조에서 조문 탐색
-                                    body = detail.get("법령", {})
-                                    jo_list = body.get("조문", {}).get("조문단위", [])
-                                    if isinstance(jo_list, dict):
-                                        jo_list = [jo_list]
-                                    
-                                    for jo in jo_list:
-                                        jo_num = jo.get("조문번호", "")
-                                        jo_title = jo.get("조문제목", "")
-                                        jo_content = jo.get("조문내용", "")
-                                        
-                                        # 연차/휴가 관련 조문만 필터 (전체가 너무 클 경우)
-                                        combined = f"{jo_title}{jo_content}"
-                                        articles.append(f"제{jo_num}조({jo_title}): {jo_content}")
-                                    
-                                except Exception as e:
-                                    print(f"⚠️ 조문 파싱 실패: {e}")
-                                    articles.append(str(detail)[:3000])
-                                
-                                extracted_parts.append(
-                                    f"=== {law_name} ===\n" + "\n".join(articles[:20])  # 최대 20개 조문
-                                )
-                            
-                            search_result = "\n\n".join(extracted_parts) if extracted_parts else "조문 데이터를 추출할 수 없습니다."
-                            
-                    except json.JSONDecodeError as e:
-                        print(f"⚠️ MCP JSON 파싱 실패: {e}")
-                        search_result = raw_json_str[:3000]
-                else:
-                    search_result = "MCP 서버에서 올바른 형식의 응답을 받지 못했습니다."
-                
+
         except httpx.TimeoutException:
-            search_result = "법령 검색 서버 응답 지연 (Timeout)."
-        except httpx.HTTPStatusError as e:
-            print(f"⚠️ [Error] MCP 서버 상태 이상: {e.response.status_code}")
-            search_result = f"법령 검색 서버가 현재 응답할 수 없습니다. (상태 코드: {e.response.status_code})"
+            raise HTTPException(status_code=504, detail="법령 검색 서버 응답 지연")
         except Exception as e:
-            print(f"⚠️ LexGuard 호출 실패: {e}")
-            search_result = "법령 검색 서버에 연결할 수 없습니다."
+            raise HTTPException(status_code=500, detail=f"MCP 호출 실패: {str(e)}")
 
-    # ✨ [디버깅 블랙박스 장착] AI의 뇌로 들어가기 직전의 순수(Raw) 데이터 확인
-    print("\n" + "🔥"*25)
-    print("🚨 [DEBUG] LexGuard MCP가 긁어온 Raw 데이터 🚨")
-    print("🔥"*25)
-    print(search_result[:1500] + "\n... (중략) ...") 
-    print("="*50 + "\n")
-
-    # =================================================================
-    # ✨ [STEP 3: 최종 답변 생성] 과거 대화 내역과 데이터를 조합하여 렌더링
-    # =================================================================
+    # MCP가 만들어준 지시문 + 법령 데이터를 그대로 Gemini에 전달
     contents = []
-
+    
     for msg in request.history:
         contents.append(
             genai_types.Content(
-                role=msg.role, 
+                role=msg.role,
                 parts=[genai_types.Part.from_text(text=msg.content)]
             )
         )
 
+    # MCP의 content[0] 지시문을 그대로 프롬프트로 활용
     final_prompt = f"""사용자 질문: {request.message}
 
-=========================================
-[국가법령 검색 데이터] 시작
-{search_result}
-[국가법령 검색 데이터] 끝
-=========================================
+{search_result_prompt}
 
-위 [국가법령 검색 데이터] 구간의 내용만을 엄격하게 분석하여, 시스템에 설정된 [답변 포맷]에 맞춰 체계적으로 답변해. 데이터에 없는 내용은 절대 지어내지 마."""
-    
-    # 🚨 중복 append 방지 (단 1번만 추가됨)
+[법령 데이터]
+{search_result_data}
+"""
+
     contents.append(
         genai_types.Content(
             role="user",
             parts=[genai_types.Part.from_text(text=final_prompt)]
         )
     )
-    
+
     try:
         final_response = gemini_client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model="gemini-3.1-flash-lite-preview",  # ← 모델명 수정
             contents=contents,
             config=gemini_config
         )
         return {"answer": final_response.text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM 처리 중 오류: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

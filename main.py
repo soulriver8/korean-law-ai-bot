@@ -81,10 +81,27 @@ async def health_check():
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
 
-    # STEP 1, 3 제거 - MCP 결과를 그대로 Gemini에 위임
-    
-    search_result_prompt = ""   # content[0]: MCP의 답변 지시문
-    search_result_data = ""     # content[1]: 법령 원문 데이터
+    # ✅ STEP 1: 검색어 최적화 (유지)
+    optimizer_prompt = f"""사용자의 질문: "{request.message}"
+    너는 대한민국 최고의 법률 검색어 최적화 AI야. 위 질문을 국가법령정보센터 검색 엔진이 가장 잘 찾을 수 있는 '정확한 법령명'과 '핵심 명사' 조합으로 변환해.
+    출력은 반드시 검색어 키워드만 나와야 해. 부가 설명은 절대 하지 마.
+    """
+    try:
+        opt_resp = gemini_client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=optimizer_prompt,
+            config=genai_types.GenerateContentConfig(temperature=0.1)
+        )
+        optimized_query = opt_resp.text.strip()
+    except Exception as e:
+        print(f"⚠️ 검색어 최적화 실패: {e}")
+        optimized_query = request.message
+
+    print(f"🎯 정제된 키워드: {optimized_query}")
+
+    # ✅ STEP 2: MCP 호출 (최적화된 검색어 사용)
+    search_result_prompt = ""
+    search_result_data = ""
 
     async with httpx.AsyncClient() as client:
         try:
@@ -94,7 +111,7 @@ async def chat(request: ChatRequest):
                 "method": "tools/call",
                 "params": {
                     "name": "legal_qa_tool",
-                    "arguments": {"query": request.message}  # 최적화 없이 그대로
+                    "arguments": {"query": optimized_query}  # ✅ 최적화된 쿼리
                 }
             }
             resp = await client.post(MCP_URL, json=payload, timeout=60.0)
@@ -105,13 +122,12 @@ async def chat(request: ChatRequest):
                     try:
                         parsed_data = json.loads(line[6:])
                         content_list = parsed_data.get("result", {}).get("content", [])
-                        
                         for item in content_list:
                             text = item.get("text", "")
                             if text.startswith("{") and '"success"' in text:
-                                search_result_data = text      # 법령 원문
+                                search_result_data = text
                             else:
-                                search_result_prompt = text    # MCP 지시문
+                                search_result_prompt = text
                         break
                     except json.JSONDecodeError:
                         continue
@@ -121,9 +137,8 @@ async def chat(request: ChatRequest):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"MCP 호출 실패: {str(e)}")
 
-    # MCP가 만들어준 지시문 + 법령 데이터를 그대로 Gemini에 전달
+    # ✅ STEP 3: Gemini 최종 답변 (MCP 지시문 활용)
     contents = []
-    
     for msg in request.history:
         contents.append(
             genai_types.Content(
@@ -132,7 +147,6 @@ async def chat(request: ChatRequest):
             )
         )
 
-    # MCP의 content[0] 지시문을 그대로 프롬프트로 활용
     final_prompt = f"""사용자 질문: {request.message}
 
 {search_result_prompt}
@@ -140,7 +154,6 @@ async def chat(request: ChatRequest):
 [법령 데이터]
 {search_result_data}
 """
-
     contents.append(
         genai_types.Content(
             role="user",
@@ -150,7 +163,7 @@ async def chat(request: ChatRequest):
 
     try:
         final_response = gemini_client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",  # ← 모델명 수정
+            model="gemini-3.1-flash-lite-preview",
             contents=contents,
             config=gemini_config
         )

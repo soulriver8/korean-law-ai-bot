@@ -61,30 +61,35 @@
     </div>
 
     <script>
+        // 대화 히스토리 저장소
+        let chatHistory = [];
+
         async function sendMessage() {
             const inputField = document.getElementById('user-input');
             const message = inputField.value.trim();
             if (!message) return;
 
-            // 1. 사용자 질문을 화면에 렌더링
             appendMessage('User', message);
             inputField.value = '';
-            
-            // 2. UI 상태 변경 (로딩 띄우고 버튼 비활성화)
             toggleLoading(true);
 
             try {
-                // 3. 백엔드 API 호출
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: message })
+                    body: JSON.stringify({
+                        message: message,
+                        history: chatHistory   // ← 히스토리 전송
+                    })
                 });
 
                 if (!response.ok) throw new Error('API 통신 에러');
                 const data = await response.json();
 
-                // 4. AI 답변을 마크다운으로 렌더링하여 화면에 출력
+                // 히스토리에 이번 대화 추가
+                chatHistory.push({ role: "user",  content: message });
+                chatHistory.push({ role: "model", content: data.answer });
+
                 appendMessage('AI', data.answer, true);
 
             } catch (error) {
@@ -111,7 +116,6 @@
                 ? 'bg-blue-600 text-white p-3 rounded-xl rounded-tr-none shadow-sm max-w-[85%] text-sm'
                 : 'bg-white border border-slate-200 p-3 rounded-xl rounded-tl-none shadow-sm max-w-[85%] text-sm text-slate-800 prose prose-sm';
             
-            // AI 답변이면 마크다운 파싱, 아니면 일반 텍스트
             if (isMarkdown) {
                 content.innerHTML = marked.parse(text);
             } else {
@@ -121,8 +125,6 @@
             div.appendChild(avatar);
             div.appendChild(content);
             chatBox.appendChild(div);
-            
-            // 스크롤을 항상 맨 아래로 유지
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 

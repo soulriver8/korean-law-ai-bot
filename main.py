@@ -29,7 +29,35 @@ if not api_key:
     raise RuntimeError("❌ [System] GOOGLE_API_KEY 누락")
 
 gemini_client = genai.Client(api_key=api_key)
-sys_instruct = "너는 대한민국 법령 전문 인공지능 'LexGuard'이다. 제공된 법령 검색 결과를 바탕으로 답변하고, 출처와 조항 번호를 반드시 인용하라."
+
+sys_instruct = """너는 대한민국 최고의 법률 전문 AI 비서 'LexGuard'이다.
+너의 임무는 제공된 법령 검색 데이터를 분석하여, 사용자에게 가장 정확하고 정돈된 법률 가이드를 제공하는 것이다.
+반드시 다음 원칙을 엄격하게 지켜서 답변하라.
+
+[절대 원칙]
+1. 할루시네이션(환각) 원천 차단: 사용자의 질문에 대한 답은 오직 함께 제공된 [국가법령 검색 데이터] 안에서만 찾아라. 
+2. 모르면 모른다고 할 것: 제공된 데이터에 관련 내용이 없다면, 절대 너의 기존 지식으로 지어내지 말고 "제공된 법령 검색 결과에서는 해당 내용에 대한 정확한 법적 근거를 찾을 수 없습니다."라고 단호하게 답변하라.
+3. 객관적 톤 유지: 법적 판단을 확정 짓는 표현("합법입니다", "불법입니다")을 피하고, "법령에 따르면 ~할 수 있습니다", "~로 해석될 여지가 있습니다"와 같이 유보적이고 전문적인 톤을 유지하라.
+
+[답변 포맷]
+답변은 무조건 아래의 마크다운 형식을 그대로 사용하여 작성하라. 줄글로 길게 늘어쓰는 것을 절대 금지한다.
+
+### 📌 핵심 요약
+- (질문에 대한 1~2줄 이내의 명확하고 간결한 방향 제시)
+
+### ⚖️ 법적 근거
+- **(관련 법령/판례명 및 조항 번호)**: (해당 조항의 핵심 내용 요약)
+  *(예: **근로기준법 제56조**: 연장근로에 대한 가산임금 지급 규정)*
+
+### 📖 상세 적용 해석
+- (제공된 법적 근거가 사용자의 질문 상황에 어떻게 적용되는지 논리적으로 설명)
+- (검색된 데이터에 있는 내용만 사용하여 2~3개의 불릿 포인트로 작성)
+
+### ⚠️ 실무 체크포인트
+- (데이터 내에 존재하는 예외 조항이나, 주의해야 할 판단 기준 1~2가지)
+- (추가로 확인이 필요한 사실관계 질문)
+"""
+
 gemini_config = genai_types.GenerateContentConfig(system_instruction=sys_instruct, temperature=0.1)
 
 # 3. FastAPI 앱 및 라우터 초기화
@@ -101,6 +129,15 @@ async def chat(request: ChatRequest):
             print(f"⚠️ LexGuard 호출 실패: {e}")
             search_result = "법령 검색 서버에 연결할 수 없습니다."
 
+    # ✨ [디버깅 블랙박스 장착] AI의 뇌로 들어가기 직전의 순수(Raw) 데이터 확인
+    print("\n" + "🔥"*25)
+    print("🚨 [DEBUG] LexGuard MCP가 긁어온 Raw 데이터 🚨")
+    print("🔥"*25)
+    # 터미널 창이 수만 자의 글로 도배되는 것을 막기 위해 1500자까지만 자르거나, 
+    # 원본을 다 보고 싶으시면 그냥 print(search_result)를 쓰시면 됩니다.
+    print(search_result[:1500] + "\n... (중략) ...") 
+    print("="*50 + "\n")
+
     # ✨ [치명적 버그 수정] 빈 리스트를 먼저 선언해야 합니다!
     contents = []
 
@@ -112,14 +149,23 @@ async def chat(request: ChatRequest):
             )
         )
 
-    final_prompt = f"사용자 질문: {request.message}\n\n[국가법령 검색 데이터]\n{search_result}\n\n위 데이터와 이전 대화 맥락에 근거하여 답변해."
+    final_prompt = f"""사용자 질문: {request.message}
+
+    =========================================
+    [국가법령 검색 데이터] 시작
+    {search_result}
+    [국가법령 검색 데이터] 끝
+    =========================================
+
+    위 [국가법령 검색 데이터] 구간의 내용만을 엄격하게 분석하여, 시스템에 설정된 [답변 포맷]에 맞춰 체계적으로 답변해. 데이터에 없는 내용은 절대 지어내지 마."""
+    
     contents.append(
         genai_types.Content(
             role="user",
             parts=[genai_types.Part.from_text(text=final_prompt)]
         )
     )
-    
+
     try:
         final_response = gemini_client.models.generate_content(
             model="gemini-3.1-flash-lite-preview",

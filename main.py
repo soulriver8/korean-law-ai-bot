@@ -114,7 +114,9 @@ async def chat(request: ChatRequest):
             if parsed_data and "result" in parsed_data:
                 content_list = parsed_data["result"].get("content", [])
                 if content_list and len(content_list) > 0:
-                    search_result = content_list[0].get("text", "검색 결과 텍스트가 없습니다.")
+                    # ✨ [수정] 무조건 배열의 '마지막' 요소를 가져오도록 [-1]로 변경합니다.
+                    # 이렇게 하면 앞에 잔소리가 몇 개가 붙든, 항상 진짜 데이터(마지막 요소)를 안전하게 빼옵니다.
+                    search_result = content_list[-1].get("text", "검색 결과 텍스트가 없습니다.")
                 else:
                     search_result = str(parsed_data["result"])
             else:

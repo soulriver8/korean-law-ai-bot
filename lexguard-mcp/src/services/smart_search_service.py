@@ -318,11 +318,18 @@ class SmartSearchService:
         for i, (api_category, params) in enumerate(api_sequence[:5], 1):  # 최대 5단계
             try:
                 if api_category == APICategory.LAW:
-                    # ✅ 1단계: 사용자의 쿼리에서 법령명과 조문 번호(제O조)를 정밀 추출
+                    # 🚨 기존의 무지성 target_laws 하드코딩(detail 통째로 다운로드) 로직 완전 삭제!
+                    
+                    # 1. 사용자의 자연어 쿼리에서 법령명과 조문 번호(제O조)를 정밀하게 추출
                     law_params = self.extract_parameters(query, "law")
                     
-                    # ✅ 2단계: [상황 A] 법령명과 조문 번호가 모두 있는 경우 -> 'single' 모드로 핀포인트 저격
+                    # 2. [상황 A] 스나이퍼 모드: 특정 조항(예: 제60조)이 명확히 언급된 경우
+                    # -> 수만 자의 법전 대신 'single' 모드로 딱 해당 조문 1개만 핀포인트 추출 (24KB 절단기 완벽 회피)
                     if law_params.get("law_name") and law_params.get("article_number"):
+                        import logging
+                        logger = logging.getLogger("lexguard-mcp")
+                        logger.info(f"🎯 Sniper Mode Activated: {law_params['law_name']} 제{law_params['article_number']}조")
+                        
                         result = await asyncio.to_thread(
                             self.law_detail_repo.get_law,
                             None, law_params["law_name"], "single", 
@@ -332,8 +339,13 @@ class SmartSearchService:
                         if result and not result.get("error"):
                             all_results.setdefault("laws", []).append(result)
                             
-                    # ✅ 3단계: [상황 B] 조문 번호가 없거나 모호한 경우 -> 원본 쿼리로 '통합 키워드 검색'
+                    # 3. [상황 B] 탐지견 모드: 조항 번호 없이 키워드만 있는 경우
+                    # -> 통째로(detail) 다운로드하지 말고, 사용자의 쿼리 그대로 국가법령정보센터 '통합 키워드 검색'에 위임
                     else:
+                        import logging
+                        logger = logging.getLogger("lexguard-mcp")
+                        logger.info(f"🐕 Search Mode Activated: query='{query}'")
+                        
                         result = await asyncio.to_thread(
                             self.law_search_repo.search_law,
                             query, 1, max_results_per_type, arguments

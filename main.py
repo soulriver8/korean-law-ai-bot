@@ -137,7 +137,7 @@ async def chat(request: ChatRequest):
     print("🔥"*25)
     # 터미널 창이 수만 자의 글로 도배되는 것을 막기 위해 1500자까지만 자르거나, 
     # 원본을 다 보고 싶으시면 그냥 print(search_result)를 쓰시면 됩니다.
-    print(search_result[:1500] + "\n... (중략) ...") 
+    print(search_result + "\n... (중략) ...") 
     print("="*50 + "\n")
 
     # ✨ [치명적 버그 수정] 빈 리스트를 먼저 선언해야 합니다!

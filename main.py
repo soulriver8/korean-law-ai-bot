@@ -80,8 +80,39 @@ async def health_check():
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    search_result = "검색된 데이터가 없습니다."
     
+    # =================================================================
+    # ✨ [STEP 1: Agentic Query Optimizer] Gemini의 뇌를 빌려 검색어 정제
+    # =================================================================
+    optimizer_prompt = f"""사용자의 질문: "{request.message}"
+    너는 대한민국 최고의 법률 검색어 최적화 AI야. 위 질문을 국가법령정보센터 검색 엔진이 가장 잘 찾을 수 있는 '정확한 법령명'과 '핵심 명사' 조합으로 변환해.
+    출력은 반드시 검색어 키워드만 나와야 해. 부가 설명은 절대 하지 마.
+    예시 1: "민방위 면제는 몇살부터?" -> "민방위기본법 편성 면제"
+    예시 2: "프리랜서도 연차 받을 수 있나요?" -> "근로기준법 연차휴가 근로자"
+    예시 3: "월세 계약 중간에 해지하고 싶어요" -> "주택임대차보호법 계약해지"
+    예시 4: "음주운전 벌금 얼마야?" -> "도로교통법 음주운전 벌칙"
+    """
+    
+    try:
+        opt_resp = gemini_client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=optimizer_prompt,
+            config=genai_types.GenerateContentConfig(temperature=0.1)
+        )
+        optimized_query = opt_resp.text.strip()
+    except Exception as e:
+        print(f"⚠️ 검색어 최적화 실패, 원본 질문 사용: {e}")
+        optimized_query = request.message
+        
+    print("\n" + "🧠"*25)
+    print(f"🤖 [Agent Brain] 사용자의 일상어 질문: {request.message}")
+    print(f"🎯 [Agent Brain] LexGuard로 보낼 정제된 키워드: {optimized_query}")
+    print("🧠"*25 + "\n")
+
+    # =================================================================
+    # ✨ [STEP 2: MCP 서버 호출] 정제된 검색어(optimized_query) 사용
+    # =================================================================
+    search_result = "검색된 데이터가 없습니다."
     print(f"🚀 [Debug] 현재 연결 시도 중인 MCP 서버 주소: {MCP_URL}")
 
     async with httpx.AsyncClient() as client:
@@ -93,7 +124,7 @@ async def chat(request: ChatRequest):
                 "params": {
                     "name": "legal_qa_tool", 
                     "arguments": {
-                        "query": request.message 
+                        "query": optimized_query  # <--- 🚨 기존 request.message에서 변경됨!
                     }
                 }
             }
@@ -114,8 +145,7 @@ async def chat(request: ChatRequest):
             if parsed_data and "result" in parsed_data:
                 content_list = parsed_data["result"].get("content", [])
                 if content_list and len(content_list) > 0:
-                    # ✨ [수정] 무조건 배열의 '마지막' 요소를 가져오도록 [-1]로 변경합니다.
-                    # 이렇게 하면 앞에 잔소리가 몇 개가 붙든, 항상 진짜 데이터(마지막 요소)를 안전하게 빼옵니다.
+                    # 무조건 마지막 요소(진짜 데이터)를 가져오도록 [-1] 유지
                     search_result = content_list[-1].get("text", "검색 결과 텍스트가 없습니다.")
                 else:
                     search_result = str(parsed_data["result"])
@@ -135,12 +165,12 @@ async def chat(request: ChatRequest):
     print("\n" + "🔥"*25)
     print("🚨 [DEBUG] LexGuard MCP가 긁어온 Raw 데이터 🚨")
     print("🔥"*25)
-    # 터미널 창이 수만 자의 글로 도배되는 것을 막기 위해 1500자까지만 자르거나, 
-    # 원본을 다 보고 싶으시면 그냥 print(search_result)를 쓰시면 됩니다.
-    print(search_result + "\n... (중략) ...") 
+    print(search_result[:1500] + "\n... (중략) ...") 
     print("="*50 + "\n")
 
-    # ✨ [치명적 버그 수정] 빈 리스트를 먼저 선언해야 합니다!
+    # =================================================================
+    # ✨ [STEP 3: 최종 답변 생성] 과거 대화 내역과 데이터를 조합하여 렌더링
+    # =================================================================
     contents = []
 
     for msg in request.history:
@@ -153,21 +183,22 @@ async def chat(request: ChatRequest):
 
     final_prompt = f"""사용자 질문: {request.message}
 
-    =========================================
-    [국가법령 검색 데이터] 시작
-    {search_result}
-    [국가법령 검색 데이터] 끝
-    =========================================
+=========================================
+[국가법령 검색 데이터] 시작
+{search_result}
+[국가법령 검색 데이터] 끝
+=========================================
 
-    위 [국가법령 검색 데이터] 구간의 내용만을 엄격하게 분석하여, 시스템에 설정된 [답변 포맷]에 맞춰 체계적으로 답변해. 데이터에 없는 내용은 절대 지어내지 마."""
+위 [국가법령 검색 데이터] 구간의 내용만을 엄격하게 분석하여, 시스템에 설정된 [답변 포맷]에 맞춰 체계적으로 답변해. 데이터에 없는 내용은 절대 지어내지 마."""
     
+    # 🚨 중복 append 방지 (단 1번만 추가됨)
     contents.append(
         genai_types.Content(
             role="user",
             parts=[genai_types.Part.from_text(text=final_prompt)]
         )
     )
-
+    
     try:
         final_response = gemini_client.models.generate_content(
             model="gemini-3.1-flash-lite-preview",

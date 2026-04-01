@@ -318,15 +318,21 @@ class SmartSearchService:
         for i, (api_category, params) in enumerate(api_sequence[:5], 1):  # 최대 5단계
             try:
                 if api_category == APICategory.LAW:
-                    target_laws = params.get("target_laws", [])
-                    if target_laws:
-                        for law_name in target_laws[:2]:
-                            result = await asyncio.to_thread(
-                                self.law_detail_repo.get_law,
-                                None, law_name, "detail", None, None, None, None, arguments
-                            )
-                            if result and not result.get("error"):
-                                all_results.setdefault("laws", []).append(result)
+                    # ✅ 1단계: 사용자의 쿼리에서 법령명과 조문 번호(제O조)를 정밀 추출
+                    law_params = self.extract_parameters(query, "law")
+                    
+                    # ✅ 2단계: [상황 A] 법령명과 조문 번호가 모두 있는 경우 -> 'single' 모드로 핀포인트 저격
+                    if law_params.get("law_name") and law_params.get("article_number"):
+                        result = await asyncio.to_thread(
+                            self.law_detail_repo.get_law,
+                            None, law_params["law_name"], "single", 
+                            law_params["article_number"], law_params.get("hang"), 
+                            law_params.get("ho"), law_params.get("mok"), arguments
+                        )
+                        if result and not result.get("error"):
+                            all_results.setdefault("laws", []).append(result)
+                            
+                    # ✅ 3단계: [상황 B] 조문 번호가 없거나 모호한 경우 -> 원본 쿼리로 '통합 키워드 검색'
                     else:
                         result = await asyncio.to_thread(
                             self.law_search_repo.search_law,
@@ -334,6 +340,7 @@ class SmartSearchService:
                         )
                         if result and result.get("laws"):
                             all_results["laws"] = result["laws"]
+                            
                     sources_count["law"] = len(all_results.get("laws", []))
                 
                 elif api_category == APICategory.PRECEDENT:
@@ -348,6 +355,8 @@ class SmartSearchService:
                         all_results["precedents"] = result["precedents"]
                         sources_count["precedent"] = len(result["precedents"])
             except Exception as e:
+                import logging
+                logger = logging.getLogger("lexguard-mcp")
                 logger.error(f"API call failed | category={api_category.value} error={e}")
                 continue
         

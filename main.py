@@ -79,6 +79,18 @@ async def chat(request: ChatRequest):
     print(f"📦 MCP 반환 데이터 길이: {len(search_result_data)} 자")
     print("="*50 + "\n")
 
+    # 🚨 [터미널 디버깅용 코드 추가] 
+    # Render 로그에 원본 데이터를 전부 쏟아붓습니다.
+    print("\n↓↓↓↓↓↓↓↓↓↓ [RAW JSON DATA START] ↓↓↓↓↓↓↓↓↓↓")
+    print(search_result_data)
+    print("↑↑↑↑↑↑↑↑↑↑ [RAW JSON DATA END] ↑↑↑↑↑↑↑↑↑↑\n")
+
+    # 💡 [팩트 체크] 38만 자 안에 진짜 '조문'이 들어있긴 한 걸까?
+    article_count = search_result_data.count('"조문제목"')
+    content_count = search_result_data.count('"조문내용"')
+    print(f"✅ 진실의 방 결과: 이 거대한 데이터 속에 진짜 조문(조문제목)이 {article_count}개 발견되었습니다!")
+    print("="*50 + "\n")
+
     # ✅ STEP 2: Gemini 최종 답변 (엄격한 포맷 지시 다 빼고, 그냥 대답하라고 함)
     contents = []
     for msg in request.history:

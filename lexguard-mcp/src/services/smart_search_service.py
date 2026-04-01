@@ -696,23 +696,23 @@ class SmartSearchService:
         #     return " ".join(keywords[:5])
 
         # 🚨 [수술 완료] AI 라우터 가동!
+        import logging
+        logger = logging.getLogger("lexguard-mcp")
+        
         llm_analysis = await self.analyze_query_with_llm(query)
         
         if llm_analysis and not llm_analysis.get("is_ambiguous"):
-            # AI가 번역해준 완벽한 키워드와 의도를 그대로 사용!
             search_types = llm_analysis.get("intent", ["law"])
             keyword_query = llm_analysis.get("optimized_keywords", query)
             
-            # 파라미터에 AI가 찾은 법령명 덮어쓰기
             if llm_analysis.get("law_name"):
                 for st in search_types:
                     if st in all_params:
                         all_params[st]["law_name"] = llm_analysis["law_name"]
                         
-            print(f"🧠 [AI 라우터 작동] 원본: {query} ➔ 검색어: {keyword_query} ➔ 의도: {search_types}")
+            logger.info(f"🎯 [AI 라우터 명중!] 원본: {query} ➔ 검색어: {keyword_query} ➔ 타겟법령: {llm_analysis.get('law_name')}")
         else:
-            # AI 통신 실패 시 기존 무식한 방법(Fallback) 유지
-            print("⚙️ [기본 라우터 작동] AI 호출 실패, 기존 로직 사용")
+            logger.warning("⚙️ [기본 라우터 작동] AI 호출 실패 또는 모호한 질문, 기존 로직 사용")
             keyword_query = query.replace("알려줘", "").replace("뭐야", "").strip()
         
         # 병렬 검색 실행
@@ -1286,12 +1286,14 @@ class SmartSearchService:
 
     async def analyze_query_with_llm(self, query: str) -> dict:
         """Gemini를 활용한 지능형 쿼리 분석 및 법률 용어 번역기 (최신 SDK 적용)"""
-        api_key = os.environ.get("GEMINI_API_KEY")
-        # 만약 Render 환경변수 이름이 GOOGLE_API_KEY라면 아래 주석을 풀고 사용하세요.
-        # api_key = os.environ.get("GOOGLE_API_KEY") 
+        import logging
+        logger = logging.getLogger("lexguard-mcp")
+        
+        # 🚨 [수정] main.py와 동일하게 GOOGLE_API_KEY를 찾도록 변경!
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         
         if not api_key:
-            print("🚨 API KEY가 없습니다.")
+            logger.error("🚨 API KEY가 없습니다. AI 라우터가 꺼집니다.") # logger 사용
             return None
             
         prompt = f"""
@@ -1315,7 +1317,6 @@ class SmartSearchService:
         사용자 질문: "{query}"
         """
         try:
-            # 🚨 최신 SDK 문법으로 클라이언트 생성 및 호출
             client = genai.Client(api_key=api_key)
             response = await asyncio.to_thread(
                 client.models.generate_content,
@@ -1323,10 +1324,13 @@ class SmartSearchService:
                 contents=prompt
             )
             
-            # JSON 파싱
             result_text = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(result_text)
+            parsed_data = json.loads(result_text)
+            
+            # AI가 번역한 결과를 로그로 쏴줌!
+            logger.info(f"🧠 [LLM 번역 완료] {parsed_data}")
+            return parsed_data
             
         except Exception as e:
-            print(f"🚨 LLM Routing Failed: {e}")
+            logger.error(f"🚨 LLM Routing Failed: {e}")
             return None

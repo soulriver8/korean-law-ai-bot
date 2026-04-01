@@ -185,9 +185,9 @@ class LawDetailRepository(BaseLawRepository):
             return {
                 "law_name": law_name_found or law_name,
                 "law_id": law_id,
-                "detail": json.dumps(detail_data, ensure_ascii=False, indent=2)[:2000] if detail_data else detail_response.text[:2000],
+                "detail": json.dumps(detail_data, ensure_ascii=False, indent=2) if detail_data else detail_response.text,
                 "api_url": detail_response.url,
-                "note": "전체 내용은 API URL에서 확인하세요."
+                "note": "2000자 제한 해제 (원본 100% 통과)"
                 }
                 
         except requests.exceptions.Timeout:

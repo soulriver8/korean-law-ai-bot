@@ -20,7 +20,7 @@ from ..repositories.law_comparison_repository import LawComparisonRepository
 import json # 추가
 import os   # 추가
 import asyncio # 추가
-import google.generativeai as genai # 추가 (pip install google-generativeai 필요)
+from google import genai
 
 
 class SmartSearchService:
@@ -1285,42 +1285,48 @@ class SmartSearchService:
         return response
 
     async def analyze_query_with_llm(self, query: str) -> dict:
-            """Gemini를 활용한 지능형 쿼리 분석 및 법률 용어 번역기 (핵심 뇌)"""
-            # API 키 설정 (환경변수에서 읽어옴. Render 설정에 GEMINI_API_KEY가 있어야 함)
-            api_key = os.environ.get("GEMINI_API_KEY")
-            if not api_key:
-                return None
-                
-            genai.configure(api_key=api_key)
+        """Gemini를 활용한 지능형 쿼리 분석 및 법률 용어 번역기 (최신 SDK 적용)"""
+        api_key = os.environ.get("GEMINI_API_KEY")
+        # 만약 Render 환경변수 이름이 GOOGLE_API_KEY라면 아래 주석을 풀고 사용하세요.
+        # api_key = os.environ.get("GOOGLE_API_KEY") 
+        
+        if not api_key:
+            print("🚨 API KEY가 없습니다.")
+            return None
             
-            prompt = f"""
-            너는 대한민국 최고 수준의 법률 API 검색 라우터야.
-            사용자의 일상적인 질문을 분석해서, 국가법령정보센터 API가 검색할 수 있는 '정확한 법률 용어 명사' 2~3개로 변환해줘.
+        prompt = f"""
+        너는 대한민국 최고 수준의 법률 API 검색 라우터야.
+        사용자의 일상적인 질문을 분석해서, 국가법령정보센터 API가 검색할 수 있는 '정확한 법률 용어 명사' 2~3개로 변환해줘.
 
-            [절대 규칙 - 환각(Hallucination) 방지]
-            1. 일상어는 반드시 법률 용어로 번역해. (예: 월급 떼먹음 -> 임금 체불, 짤림 -> 해고, 알바 -> 단시간근로자)
-            2. '상', '규정', '알려줘', '어떻게', '뭐야' 같은 불필요한 서술어는 절대 포함하지 마.
-            3. 네가 임의로 조문 번호(예: 제60조)를 지어내지 마. 사용자가 명시했을 때만 추출해.
-            4. 출력은 반드시 아래 JSON 형식만 반환해. 마크다운(```json) 쓰지 말고 순수 JSON 텍스트만 줘.
+        [절대 규칙 - 환각(Hallucination) 방지]
+        1. 일상어는 반드시 법률 용어로 번역해. (예: 월급 떼먹음 -> 임금 체불, 짤림 -> 해고, 알바 -> 단시간근로자)
+        2. '상', '규정', '알려줘', '어떻게', '뭐야' 같은 불필요한 서술어는 절대 포함하지 마.
+        3. 네가 임의로 조문 번호(예: 제60조)를 지어내지 마. 사용자가 명시했을 때만 추출해.
+        4. 출력은 반드시 아래 JSON 형식만 반환해. 마크다운(```json) 쓰지 말고 순수 JSON 텍스트만 줘.
 
-            [출력 형식]
-            {{
-                "intent": ["law", "precedent"], // 관련 높은 카테고리 우선순위대로 1~2개 (law, precedent, interpretation 등)
-                "optimized_keywords": "근로기준법 연차", // API 검색용 정제된 키워드 (띄어쓰기로 구분)
-                "law_name": "근로기준법", // 명확한 법령명이 유추되면 추출 (없으면 null)
-                "is_ambiguous": false // 질문이 너무 짧거나 모호한지 여부 (true/false)
-            }}
+        [출력 형식]
+        {{
+            "intent": ["law", "precedent"],
+            "optimized_keywords": "근로기준법 연차",
+            "law_name": "근로기준법",
+            "is_ambiguous": false
+        }}
 
-            사용자 질문: "{query}"
-            """
-            try:
-                # 가장 빠르고 가벼운 모델 사용
-                model = genai.GenerativeModel('gemini-3.1-flash-lite-preview') 
-                response = await asyncio.to_thread(model.generate_content, prompt)
-                
-                # JSON 파싱 (마크다운 찌꺼기 제거)
-                result_text = response.text.replace("```json", "").replace("```", "").strip()
-                return json.loads(result_text)
-            except Exception as e:
-                print(f"🚨 LLM Routing Failed: {e}")
-                return None # 실패 시 기존 깡통 로직(Fallback)으로 돌아가도록 None 반환
+        사용자 질문: "{query}"
+        """
+        try:
+            # 🚨 최신 SDK 문법으로 클라이언트 생성 및 호출
+            client = genai.Client(api_key=api_key)
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            
+            # JSON 파싱
+            result_text = response.text.replace("```json", "").replace("```", "").strip()
+            return json.loads(result_text)
+            
+        except Exception as e:
+            print(f"🚨 LLM Routing Failed: {e}")
+            return None

@@ -8,8 +8,6 @@ httpx
 # AI 모델 연동
 google-genai
 
-google-generativeai
-
 # 환경 변수 및 데이터 검증
 python-dotenv
 pydantic

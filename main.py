@@ -167,6 +167,16 @@ async def chat(request: ChatRequest):
             contents=contents,
             config=gemini_config
         )
-        return {"answer": final_response.text}
+        
+        # ✨ [수정됨] 프론트엔드로 디버깅 데이터를 함께 넘겨줍니다.
+        return {
+            "answer": final_response.text,
+            "debug_info": {
+                "original_msg": request.message,
+                "optimized_query": optimized_query,
+                "raw_mcp_data": search_result_data if search_result_data else search_result_prompt
+            }
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM 처리 중 오류: {str(e)}")
